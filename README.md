@@ -1,4 +1,6 @@
-# Initial Setup
+# CS 744 Asg 2 - Distributed ML
+
+## Initial Setup
 ### Local Modules
 Install parallel-ssh
 ```bash
@@ -36,7 +38,7 @@ Create dir
 pssh mkdir programs
 ```
 
-# Starting the Nodes
+## Starting the Nodes
 ### Website
 `https://www.cloudlab.us/status.php?uuid=<UUID>`
 
@@ -47,7 +49,7 @@ ssh <USER NAME>@<CLUSTER ID>.wisc.cloudlab.us -i ~/.ssh/id_cloudlab -p 27010
 ```
 
 
-# Running Scripts
+## Running Scripts
 ### Setup
 Copy over necessary files
 ```bash
