@@ -1,20 +1,45 @@
-import os
-import torch
-import json
+import argparse
 import copy
+import json
+import logging
+import os
+import random
+from time import perf_counter
+
+import model as mdl
 import numpy as np
-from torchvision import datasets, transforms
+import torch
+import torch.distributed as dd
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import logging
-import random
-import model as mdl
-device = "cpu"
-torch.set_num_threads(4)
+from torchvision import datasets, transforms
 
-batch_size = 256 # batch for one node
-cli_interval = 20 # log every _ batches
+
+# Parse arguments (But don't use them)
+parser = argparse.ArgumentParser()
+parser.add_argument('--master-ip', dest='master_ip', type=str)
+parser.add_argument('--master-port', dest='master_port', default=6585, type=int)
+parser.add_argument('--num-nodes', dest='num_nodes', type=int)
+parser.add_argument('--rank', dest='rank', type=int)
+args = parser.parse_args()
+MASTER_IP = args.master_ip
+MASTER_PORT = args.master_port
+NUM_NODES = args.num_nodes
+RANK = args.rank
+
+# Seeding
+np.random.seed(42)
+torch.manual_seed(42)
+
+# Setup
+device = 'cpu'
+torch.set_num_threads(4)
+BATCH_SIZE = 256 # batch for one node
+CLI_INTERVAL = 20 # log every _ batches
+SAMPLE_INTERVAL = (1, 40) # Not right-side inclusive
+
+
 def train_model(model, train_loader, optimizer, criterion, epoch):
     """
     model (torch.nn.module): The model created to train
@@ -26,6 +51,15 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
 
     # remember to exit the train loop at end of the epoch
     for batch_idx, (data, target) in enumerate(train_loader):
+        # Add timer
+        if batch_idx == SAMPLE_INTERVAL[0]:
+            start_time = perf_counter()
+        elif batch_idx == SAMPLE_INTERVAL[1]:
+            duration = perf_counter() - start_time
+            avg_time = duration / (SAMPLE_INTERVAL[1] - SAMPLE_INTERVAL[0])
+            print(f'Average batch times {SAMPLE_INTERVAL}: {avg_time}')
+
+        # Make data usable
         data, target = data.to(device), target.to(device)
 
         # Forward
@@ -37,9 +71,9 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
         loss.backward()
         optimizer.step()
 
-        # Log every `cli_interval` batches
-        if batch_idx % cli_interval == 0:
-            print(f"{'-' * 10}\nEpoch: {epoch}\nBatch: {batch_idx}\nTraining Loss: {loss}")
+        # Log every `CLI_INTERVAL` batches
+        if batch_idx % CLI_INTERVAL == 0:
+            print(f'Epoch: {epoch}, Batch: {batch_idx}, Local loss: {loss}')
 
     return None
 
@@ -78,7 +112,7 @@ def main():
                                                 download=True, transform=transform_train)
     train_loader = torch.utils.data.DataLoader(training_set,
                                                     num_workers=2,
-                                                    batch_size=batch_size,
+                                                    batch_size=BATCH_SIZE,
                                                     sampler=None,
                                                     shuffle=True,
                                                     pin_memory=True)
@@ -87,7 +121,7 @@ def main():
 
     test_loader = torch.utils.data.DataLoader(test_set,
                                               num_workers=2,
-                                              batch_size=batch_size,
+                                              batch_size=BATCH_SIZE,
                                               shuffle=False,
                                               pin_memory=True)
     training_criterion = torch.nn.CrossEntropyLoss().to(device)

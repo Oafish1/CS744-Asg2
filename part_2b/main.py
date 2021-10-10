@@ -18,7 +18,7 @@ from torchvision import datasets, transforms
 # Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--master-ip', dest='master_ip', type=str)
-parser.add_argument('--master-port', dest='master_port', default=29500, type=int)
+parser.add_argument('--master-port', dest='master_port', default=6585, type=int)
 parser.add_argument('--num-nodes', dest='num_nodes', type=int)
 parser.add_argument('--rank', dest='rank', type=int)
 args = parser.parse_args()
@@ -30,11 +30,10 @@ RANK = args.rank
 # Distributed setup
 print('Initializing...')
 MAIN_RANK = 0
-store = dd.TCPStore(MASTER_IP,
-                    MASTER_PORT,
-                    world_size=NUM_NODES,
-                    is_master=RANK == MAIN_RANK)
-dd.init_process_group('gloo', store=store, rank=RANK, world_size=NUM_NODES)
+dd.init_process_group('gloo',
+                      init_method=f'tcp://{MASTER_IP}:{MASTER_PORT}',
+                      rank=RANK,
+                      world_size=NUM_NODES)
 WORLD_SIZE = torch.distributed.get_world_size()
 LOCAL_SIZE = torch.cuda.device_count()
 
@@ -43,6 +42,7 @@ device = 'cpu'
 torch.set_num_threads(4)
 BATCH_SIZE = int(256 / NUM_NODES)
 CLI_INTERVAL = 20
+SAMPLE_INTERVAL = (1, 40) # Not right-side inclusive
 
 
 def train_model(model, train_loader, optimizer, criterion, epoch):
@@ -54,6 +54,15 @@ def train_model(model, train_loader, optimizer, criterion, epoch):
     epoch (int): Current epoch number
     """
     for batch_idx, (data, target) in enumerate(train_loader):
+        # Add timer
+        if batch_idx == SAMPLE_INTERVAL[0]:
+            start_time = perf_counter()
+        elif batch_idx == SAMPLE_INTERVAL[1]:
+            duration = perf_counter() - start_time
+            avg_time = duration / (SAMPLE_INTERVAL[1] - SAMPLE_INTERVAL[0])
+            print(f'Average batch times {SAMPLE_INTERVAL}: {avg_time}')
+
+        # Make data usable
         data, target = data.to(device), target.to(device)
 
         # Forward
@@ -111,12 +120,15 @@ def main():
             normalize])
     training_set = datasets.CIFAR10(root="./data", train=True,
                                                 download=True, transform=transform_train)
+
+    # Add distributed sampling
+    distributed_sampler = torch.utils.data.distributed.DistributedSampler(training_set)
     train_loader = torch.utils.data.DataLoader(training_set,
                                                     num_workers=2,
                                                     batch_size=BATCH_SIZE,
-                                                    sampler=None,
-                                                    shuffle=True,
+                                                    sampler=distributed_sampler,
                                                     pin_memory=True)
+
     test_set = datasets.CIFAR10(root="./data", train=False,
                                 download=True, transform=transform_test)
 
