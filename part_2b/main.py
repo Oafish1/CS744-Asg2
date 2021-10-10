@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import random
+from time import perf_counter
 
 import model as mdl
 import numpy as np
@@ -36,6 +37,10 @@ dd.init_process_group('gloo',
                       world_size=NUM_NODES)
 WORLD_SIZE = torch.distributed.get_world_size()
 LOCAL_SIZE = torch.cuda.device_count()
+
+# Seeding
+np.random.seed(42)
+torch.manual_seed(42)
 
 # Setup
 device = 'cpu'
